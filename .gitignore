@@ -1,0 +1,8 @@
+# Local Whisper model artifacts (large binary files; keep them out of Git)
+ResilienceInterview/Resources/Models/ggml-small.bin
+ResilienceInterview/Resources/Models/ggml-small-encoder.mlmodelc/
+
+# Xcode local/generated files
+DerivedData/
+*.xcuserstate
+xcuserdata/
