@@ -8,6 +8,7 @@ final class TranscriptionViewModel: ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var isTranscribing = false
     @Published private(set) var isSending = false
+    @Published private(set) var messages: [InterviewMessage]
     @Published private(set) var elapsedSeconds = 0
     @Published var isShowingError = false
     @Published var errorMessage = ""
@@ -18,12 +19,15 @@ final class TranscriptionViewModel: ObservableObject {
     private let api: InterviewAPIClient
     private let sessionID: String
     private let language: String
+    private let player = AudioPlayer()
     private var timer: Timer?
+    private var isEnded = false
 
-    init(api: InterviewAPIClient, sessionID: String, language: String) {
+    init(api: InterviewAPIClient, sessionID: String, language: String, initialMessages: [InterviewMessage] = []) {
         self.api = api
         self.sessionID = sessionID
         self.language = language
+        messages = initialMessages
         let url = ModelStore().defaultModelURL()
         modelURL = url
         transcriber = url.map { WhisperTranscriber(modelURL: $0) }
@@ -38,7 +42,28 @@ final class TranscriptionViewModel: ObservableObject {
 
     func clearTranscript() { transcript = ""; progress = 0 }
 
+    func speakInitialMessage() {
+        guard let message = messages.last(where: { $0.role == "system" }) else { return }
+        player.speak(message.content, language: language)
+    }
+
+    func stopSpeaking() { player.stop() }
+
+    func forceEndInterview() {
+        isEnded = true
+        timer?.invalidate()
+        timer = nil
+        if isRecording {
+            recorder.cancel()
+            isRecording = false
+        }
+        player.stop()
+        isTranscribing = false
+        isSending = false
+    }
+
     private func startRecording() async {
+        guard !isEnded else { return }
         do {
             try await recorder.start()
             elapsedSeconds = 0
@@ -65,6 +90,7 @@ final class TranscriptionViewModel: ObservableObject {
     }
 
     private func transcribe(audioURL: URL) async throws {
+        guard !isEnded else { return }
         guard let transcriber else { throw TranscriptionError.missingModel }
         isTranscribing = true
         progress = 0
@@ -75,15 +101,22 @@ final class TranscriptionViewModel: ObservableObject {
         transcript = text
         progress = 1
         isTranscribing = false
+        guard !isEnded else { return }
         try await sendTranscript()
     }
 
     private func sendTranscript() async throws {
+        guard !isEnded else { return }
         guard !transcript.isEmpty else { throw TranscriptionError.emptyTranscript }
         isSending = true
         defer { isSending = false }
-        _ = try await api.sendTranscript(sessionID: sessionID, text: transcript, language: language,
-                                         clientMessageID: UUID().uuidString)
+        let result = try await api.sendTranscript(sessionID: sessionID, text: transcript, language: language,
+                                                   clientMessageID: UUID().uuidString)
+        guard !isEnded else { return }
+        messages = result.messages
+        if let latest = result.messages.last(where: { $0.role == "system" }) {
+            player.speak(latest.content, language: language)
+        }
     }
 
     private func show(_ error: Error) {

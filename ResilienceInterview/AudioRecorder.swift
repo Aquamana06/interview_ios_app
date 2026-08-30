@@ -32,6 +32,16 @@ final class AudioRecorder: NSObject {
         return currentURL
     }
 
+    func cancel() {
+        recorder?.stop()
+        recorder = nil
+        if let currentURL {
+            try? FileManager.default.removeItem(at: currentURL)
+        }
+        self.currentURL = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
     private func requestPermission() async -> Bool {
         await withCheckedContinuation { continuation in
             AVAudioApplication.requestRecordPermission { granted in continuation.resume(returning: granted) }

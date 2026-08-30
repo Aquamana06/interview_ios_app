@@ -5,10 +5,21 @@ struct HomeView: View {
     @State private var language = "ja"
     @State private var operatorID = ""
     @State private var displayName = ""
+    @State private var accountToDelete: AdminAccount?
+    @State private var isActiveAccountsExpanded = false
+    @State private var isInactiveAccountsExpanded = false
+    private let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        formatter.locale = Locale(identifier: "ja_JP")
+        return formatter
+    }()
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
+            ScrollView {
+                VStack(spacing: 20) {
                 Text("こんにちは、\(app.account?.displayName ?? "")さん")
                     .font(.title2)
                 Picker("言語", selection: $language) {
@@ -39,10 +50,55 @@ struct HomeView: View {
                     }
                     .padding()
                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("オペレータアカウント").font(.headline)
+                            Spacer()
+                            Button { Task { await app.loadAdminData() } } label: {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                        }
+                        DisclosureGroup("有効なアカウント（\(activeAccounts.count)）", isExpanded: $isActiveAccountsExpanded) {
+                            accountRows(activeAccounts, canDisable: true)
+                        }
+                        DisclosureGroup("無効化済み（\(inactiveAccounts.count)）", isExpanded: $isInactiveAccountsExpanded) {
+                            accountRows(inactiveAccounts, canDisable: false)
+                        }
+                    }
+                    .padding()
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("過去のインタビュー").font(.headline)
+                            Spacer()
+                            Text("全\(app.adminHistories.count)回").font(.caption).foregroundStyle(.secondary)
+                        }
+                        ForEach(app.adminHistories) { history in
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack {
+                                    Text(history.displayName).font(.subheadline.bold())
+                                    Spacer()
+                                    Text(history.statusLabel)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(history.title)
+                                Text("\(history.startedDate.map { dateFormatter.string(from: $0) } ?? history.startedAt)・\(history.messageCount)メッセージ")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        if app.adminHistories.isEmpty { Text("履歴はありません").foregroundStyle(.secondary) }
+                    }
+                    .padding()
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
                 }
-                Spacer()
+                }
             }
             .padding()
+            .task { await app.loadAdminData() }
             .navigationTitle("ホーム")
             .toolbar {
                 Button("ログアウト") { app.logout() }
@@ -56,6 +112,53 @@ struct HomeView: View {
             .alert("エラー", isPresented: $app.isShowingError) {
                 Button("OK", role: .cancel) {}
             } message: { Text(app.errorMessage) }
+            .confirmationDialog("このアカウントを無効化しますか？", isPresented: Binding(
+                get: { accountToDelete != nil },
+                set: { if !$0 { accountToDelete = nil } }
+            ), titleVisibility: .visible) {
+                Button("無効化する", role: .destructive) {
+                    if let account = accountToDelete {
+                        Task { await app.deleteOperator(id: account.id) }
+                    }
+                    accountToDelete = nil
+                }
+                Button("キャンセル", role: .cancel) { accountToDelete = nil }
+            } message: {
+                Text("このアカウントはログインできなくなります。過去の履歴は保持されます。")
+            }
+        }
+    }
+
+    private var activeAccounts: [AdminAccount] {
+        app.adminAccounts.filter { $0.role == "operator" && $0.isActive }
+    }
+
+    private var inactiveAccounts: [AdminAccount] {
+        app.adminAccounts.filter { $0.role == "operator" && !$0.isActive }
+    }
+
+    @ViewBuilder
+    private func accountRows(_ accounts: [AdminAccount], canDisable: Bool) -> some View {
+        if accounts.isEmpty {
+            Text("該当するアカウントはありません")
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 4)
+        } else {
+            ForEach(accounts) { account in
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text("\(account.displayName)（\(account.id)）")
+                        Text("発行日 \(account.issuedDateLabel)")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if canDisable {
+                        Button("無効化", role: .destructive) { accountToDelete = account }
+                            .font(.caption)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
         }
     }
 }
