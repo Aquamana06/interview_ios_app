@@ -9,9 +9,17 @@ import SwiftUI
 
 @main
 struct ResilienceInterviewApp: App {
+    @StateObject private var app = AppViewModel()
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            Group {
+                if app.isLoggedIn {
+                    HomeView(app: app)
+                } else {
+                    LoginView(app: app)
+                }
+            }
         }
     }
 }
