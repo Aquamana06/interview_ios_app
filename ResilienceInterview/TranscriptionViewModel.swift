@@ -9,6 +9,7 @@ final class TranscriptionViewModel: ObservableObject {
     @Published private(set) var isTranscribing = false
     @Published private(set) var isSending = false
     @Published private(set) var messages: [InterviewMessage]
+    @Published private(set) var displayedAIText = ""
     @Published private(set) var elapsedSeconds = 0
     @Published var isShowingError = false
     @Published var errorMessage = ""
@@ -21,6 +22,7 @@ final class TranscriptionViewModel: ObservableObject {
     private let language: String
     private let player = AudioPlayer()
     private var timer: Timer?
+    private var typingTask: Task<Void, Never>?
     private var isEnded = false
 
     init(api: InterviewAPIClient, sessionID: String, language: String, initialMessages: [InterviewMessage] = []) {
@@ -28,9 +30,10 @@ final class TranscriptionViewModel: ObservableObject {
         self.sessionID = sessionID
         self.language = language
         messages = initialMessages
+        displayedAIText = initialMessages.last(where: { $0.role == "system" })?.content ?? ""
         let url = ModelStore().defaultModelURL()
         modelURL = url
-        transcriber = url.map { WhisperTranscriber(modelURL: $0) }
+        transcriber = url.map { WhisperTranscriber(modelURL: $0, language: language) }
     }
 
     var hasModel: Bool { modelURL != nil && transcriber != nil }
@@ -44,13 +47,15 @@ final class TranscriptionViewModel: ObservableObject {
 
     func speakInitialMessage() {
         guard let message = messages.last(where: { $0.role == "system" }) else { return }
-        player.speak(message.content, language: language)
+        speak(message.content)
     }
 
     func stopSpeaking() { player.stop() }
 
     func forceEndInterview() {
         isEnded = true
+        typingTask?.cancel()
+        typingTask = nil
         timer?.invalidate()
         timer = nil
         if isRecording {
@@ -115,8 +120,21 @@ final class TranscriptionViewModel: ObservableObject {
         guard !isEnded else { return }
         messages = result.messages
         if let latest = result.messages.last(where: { $0.role == "system" }) {
-            player.speak(latest.content, language: language)
+            speak(latest.content)
         }
+    }
+
+    private func speak(_ text: String) {
+        typingTask?.cancel()
+        displayedAIText = ""
+        typingTask = Task { @MainActor [weak self] in
+            for character in text {
+                guard !Task.isCancelled, let self else { return }
+                self.displayedAIText.append(character)
+                try? await Task.sleep(for: .milliseconds(45))
+            }
+        }
+        player.speak(text, language: language)
     }
 
     private func show(_ error: Error) {

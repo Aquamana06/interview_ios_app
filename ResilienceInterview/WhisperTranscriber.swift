@@ -6,8 +6,12 @@ final class WhisperTranscriber: NSObject, WhisperDelegate {
     private let whisper: Whisper
     private var progressHandler: ((Double) -> Void)?
 
-    init(modelURL: URL) {
-        whisper = Whisper(fromFileURL: modelURL)
+    init(modelURL: URL, language: String) {
+        let params = WhisperParams()
+        params.language = WhisperLanguage(rawValue: language) ?? .japanese
+        params.detect_language = false
+        params.n_threads = Int32(max(1, ProcessInfo.processInfo.activeProcessorCount - 1))
+        whisper = Whisper(fromFileURL: modelURL, withParams: params)
         super.init()
         whisper.delegate = self
     }
